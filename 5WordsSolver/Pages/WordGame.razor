@@ -1,0 +1,139 @@
+﻿@page "/wordgame"
+
+@using System.Net.Http
+@using System.Net.Http.Json
+@inject HttpClient Http
+
+<div id="game-container">
+    @foreach (var row in Rows)
+    {
+        <div class="word-row">
+            @for (int i = 0; i < 5; i++)
+            {
+                 int index = i; // захват значения i
+                <input type="text" class="letter-cell @GetColorClass(row.Result[i])"
+               @ref="row.InputRefs[index]"
+               maxlength="1"
+               @oninput="(e) => OnInput(e, row, index)"
+               @onkeydown="(e) => OnKeyDown(e, row, index)"
+               value="@row.Text[i]"
+               disabled="@(!row.IsActive)" />
+                @if (row.IsActive)
+                {
+                    <div class="color-select">
+                        <div class="color-option gray" @onclick="() => SelectColor(row, index, 0)"></div>
+                        <div class="color-option white" @onclick="() => SelectColor(row, index, 1)"></div>
+                        <div class="color-option yellow" @onclick="() => SelectColor(row, index, 2)"></div>
+                    </div>
+                }
+            }
+        </div>
+    }
+</div>
+<button @onclick="SubmitWords" disabled="@(!CurrentRow?.IsActive ?? true)">Submit</button>
+
+@code {
+    private const int MaxRows = 6;
+    private List<WordRow> Rows { get; set; } = new List<WordRow>();
+
+    private WordRow CurrentRow => Rows.LastOrDefault(r => r.IsActive);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await InitializeGame();
+    }
+
+    private async Task InitializeGame()
+    {
+        var firstWord = await FetchFirstWord();
+        Rows.Add(new WordRow { Text = firstWord.ToCharArray(), IsActive = true });
+    }
+
+    private async Task<string> FetchFirstWord()
+    {
+        var response = await Http.GetFromJsonAsync<List<string>>("words");
+        return response?.FirstOrDefault() ?? string.Empty;
+    }
+
+    private void SelectColor(WordRow row, int index, int color)
+    {
+        row.Result[index] = color;
+    }
+
+    private string GetColorClass(int color)
+    {
+        return color switch
+        {
+            1 => "white",
+            2 => "yellow",
+            _ => "gray"
+        };
+    }
+
+    private async Task SubmitWords()
+    {
+        var requestPayload = Rows.Select(row => new Word
+            {
+                Text = new string(row.Text),
+                Result = row.Result
+            }).ToList();
+
+        var response = await Http.PostAsJsonAsync("words", requestPayload);
+        var newWords = await response.Content.ReadFromJsonAsync<List<string>>();
+
+        if (newWords?.Any() == true && Rows.Count < MaxRows)
+        {
+            CurrentRow.IsActive = false;
+            Rows.Add(new WordRow { Text = newWords[0].ToCharArray(), IsActive = true });
+        }
+    }
+
+    private void OnInput(ChangeEventArgs e, WordRow row, int index)
+    {
+        var input = e.Value?.ToString();
+        if (!string.IsNullOrEmpty(input))
+        {
+            row.Text[index] = input[0];
+            FocusNextCell(index + 1);
+        }
+    }
+
+    private void OnKeyDown(KeyboardEventArgs e, WordRow row, int index)
+    {
+        if (e.Key == "Backspace" && string.IsNullOrEmpty(row.Text[index].ToString()))
+        {
+            FocusNextCell(index - 1);
+        }
+    }
+
+    private void FocusNextCell(int index)
+    {
+        if (index >= 0 && index < 5)
+        {
+            var inputRef = CurrentRow?.InputRefs[index];
+            inputRef?.FocusAsync();
+        }
+    }
+
+    private class WordRow
+    {
+        public char[] Text { get; set; } = new char[5];
+        public int[] Result { get; set; } = new int[5];
+        public bool IsActive { get; set; }
+        public ElementReference[] InputRefs { get; set; } = new ElementReference[5];
+
+        public WordRow()
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                Result[i] = 0; // Установить серый цвет по умолчанию
+            }
+        }
+    }
+
+    private class Word
+    {
+        public string Text { get; set; }
+        public int[] Result { get; set; }
+    }
+}
